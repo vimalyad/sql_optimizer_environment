@@ -1604,6 +1604,7 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "openenv-core", extra = ["core"] },
+    { name = "sqlglot" },
 ]
 
 [package.optional-dependencies]
@@ -1617,6 +1618,7 @@ requires-dist = [
     { name = "openenv-core", extras = ["core"], specifier = ">=0.2.2" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0.0" },
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=4.0.0" },
+    { name = "sqlglot", specifier = ">=30.2.1" },
 ]
 provides-extras = ["dev"]
 
@@ -2615,6 +2617,15 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/a2/87/a6771e1546d97e7e041b6ae58d80074f81b7d5121207425c964ddf5cfdbd/sniffio-1.3.1.tar.gz", hash = "sha256:f4324edc670a0f49750a81b895f35c3adb843cca46f0530f79fc1babb23789dc", size = 20372, upload-time = "2024-02-25T23:20:04.057Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/e9/44/75a9c9421471a6c4805dbf2356f7c181a29c1879239abab1ea2cc8f38b40/sniffio-1.3.1-py3-none-any.whl", hash = "sha256:2f6da418d1f1e0fddd844478f41680e794e6051915791a034ff65e5f100525a2", size = 10235, upload-time = "2024-02-25T23:20:01.196Z" },
+]
+
+[[package]]
+name = "sqlglot"
+version = "30.2.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/ff/5a/b8149963cd479a7e5b71f43d11d678f5e4b8633ab4de5b25e7a5d6eefa20/sqlglot-30.2.1.tar.gz", hash = "sha256:ef4a67cc6f66a8043085eb8ea95fa9541c1625dffa9145ad4e9815a7ba60a199", size = 5820630, upload-time = "2026-04-02T11:47:22.061Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/69/13/f8c5dd59b119feee28cce53f23361d955cd46d0612697d49db0070f41ea9/sqlglot-30.2.1-py3-none-any.whl", hash = "sha256:f23d9ee9427ef9d20df15f9b0ffa57d9eb45e52b012219a349d1e6b50ed926d1", size = 668564, upload-time = "2026-04-02T11:47:19.34Z" },
 ]
 
 [[package]]
