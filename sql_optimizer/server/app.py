@@ -1,25 +1,23 @@
-# sql_optimizer_env/server/app.py
-
 import os
 from openenv.core.env_server import create_fastapi_app
-from sql_optimizer.server import SQLOptimizerEnvironment
 
-# Database config from environment variables
-# These are set in the Dockerfile or docker run command
-DB_CONFIG = {
-    "host":     os.getenv("POSTGRES_HOST", "localhost"),
-    "port":     int(os.getenv("POSTGRES_PORT", "5432")),
-    "database": os.getenv("POSTGRES_DB", "tpch"),
-    "user":     os.getenv("POSTGRES_USER", "postgres"),
-    "password": os.getenv("POSTGRES_PASSWORD", "postgres"),
-}
+# Import the environment class and your Pydantic models
+from sql_optimizer.server.sql_optimizer_environment import SQLOptimizerEnvironment
+from sql_optimizer.models import SQLAction, SQLObservation
 
-env = SQLOptimizerEnvironment(db_config=DB_CONFIG, max_steps=10)
-app = create_fastapi_app(env)
+# Wrap the environment in the standard OpenEnv FastAPI server.
+# Notice we pass the CLASS itself (SQLOptimizerEnvironment) as the factory, 
+# not an instance (SQLOptimizerEnvironment()).
+app = create_fastapi_app(
+    env=SQLOptimizerEnvironment,
+    action_cls=SQLAction,
+    observation_cls=SQLObservation
+)
 
 def main():
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    # It is best practice to pass the app as an import string when using uvicorn
+    uvicorn.run("sql_optimizer.server.app:app", host="0.0.0.0", port=8000)
 
 if __name__ == "__main__":
     main()
