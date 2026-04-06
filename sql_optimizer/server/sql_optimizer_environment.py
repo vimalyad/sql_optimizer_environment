@@ -30,7 +30,7 @@ class SQLOptimizerEnvironment(Environment[SQLAction, SQLObservation, SQLState]):
     RL environment that teaches an agent to rewrite slow SQL queries.
 
     The environment has no knowledge of any schema upfront.
-    At reset() time the user provides:
+    At reset() time the user provides via kwargs:
       - query:  the slow SQL query they want optimized
       - db_url: connection string to their Postgres database
 
@@ -63,13 +63,23 @@ class SQLOptimizerEnvironment(Environment[SQLAction, SQLObservation, SQLState]):
     # CORE INTERFACE
     # ─────────────────────────────────────────────────────────────────────────
 
-    def reset(self, query: str, db_url: str) -> SQLObservation:
+    def reset(
+        self,
+        seed: Optional[int] = None,
+        episode_id: Optional[str] = None,
+        **kwargs: Any
+    ) -> SQLObservation:
         """
         Start a new optimization episode.
         """
+        query = kwargs.get("query", "")
+        db_url = kwargs.get("db_url", "")
+
         query = query.strip()
         if not query:
-            raise ValueError("query cannot be empty")
+            raise ValueError("query cannot be empty. Pass it via reset kwargs.")
+        if not db_url:
+            raise ValueError("db_url must be provided. Pass it via reset kwargs.")
         if not query.upper().startswith("SELECT"):
             raise ValueError(
                 "Only SELECT queries are supported. "
@@ -87,7 +97,7 @@ class SQLOptimizerEnvironment(Environment[SQLAction, SQLObservation, SQLState]):
         self._available_extensions = self._db.available_extensions
 
         # Reset episode state
-        self._episode_id       = str(uuid.uuid4())
+        self._episode_id       = episode_id or str(uuid.uuid4())
         self._original_query   = query
         self._current_query    = query
         self._rewrites_applied = []
@@ -104,7 +114,12 @@ class SQLOptimizerEnvironment(Environment[SQLAction, SQLObservation, SQLState]):
 
         return self._build_observation(plan=plan, reward=0.0, done=False)
 
-    def step(self, action: SQLAction) -> SQLObservation:
+    def step(
+        self, 
+        action: SQLAction, 
+        timeout_s: Optional[float] = None, 
+        **kwargs: Any
+    ) -> SQLObservation:
         """
         Apply one rewrite action to the current query.
         """
@@ -112,9 +127,6 @@ class SQLOptimizerEnvironment(Environment[SQLAction, SQLObservation, SQLState]):
             raise RuntimeError("Call reset() before step()")
 
         self._step_count += 1
-
-        # NOTE: Manual validation removed. `action` is fully validated by 
-        # Pydantic via the openenv framework before this step executes.
 
         # Terminal action
         if action.action_id == 9:
@@ -169,18 +181,18 @@ class SQLOptimizerEnvironment(Environment[SQLAction, SQLObservation, SQLState]):
                 (self._baseline_time_ms - self._current_time_ms)
                 / self._baseline_time_ms * 100
             )
-        return SQLState(
-            episode_id=self._episode_id,
-            original_query=self._original_query,
-            current_query=self._current_query,
-            baseline_time_ms=self._baseline_time_ms,
-            current_time_ms=self._current_time_ms,
-            rewrites_applied=self._rewrites_applied,
-            available_extensions=self._available_extensions,
-            step_count=self._step_count,
-            total_reward=self._total_reward,
-            improvement_pct=round(improvement, 2),
-        )
+        return SQLState(**{
+            "episode_id": self._episode_id,
+            "original_query": self._original_query,
+            "current_query": self._current_query,
+            "baseline_time_ms": self._baseline_time_ms,
+            "current_time_ms": self._current_time_ms,
+            "rewrites_applied": self._rewrites_applied,
+            "available_extensions": self._available_extensions,
+            "step_count": self._step_count,
+            "total_reward": self._total_reward,
+            "improvement_pct": round(improvement, 2),
+        })
 
     def close(self):
         """Cleanup Hook."""
@@ -430,7 +442,7 @@ class SQLOptimizerEnvironment(Environment[SQLAction, SQLObservation, SQLState]):
                     )
 
             from_clause = tree.find(exp.From)
-            if from_clause:
+            if from_clause and from_clause.parent:
                 from_clause.parent.append("joins", new_join)
 
             in_expr.pop()
@@ -452,6 +464,9 @@ class SQLOptimizerEnvironment(Environment[SQLAction, SQLObservation, SQLState]):
         return tree.sql(dialect="postgres")
 
     def _replace_select_star(self, sql: str, **_) -> str:
+        if not self._db:
+            return sql
+            
         tree = sqlglot.parse_one(sql, dialect="postgres")
         if not tree.find(exp.Star):
             return sql
@@ -470,7 +485,9 @@ class SQLOptimizerEnvironment(Environment[SQLAction, SQLObservation, SQLState]):
                 )
 
         if explicit:
-            tree.find(exp.Select).set("expressions", explicit)
+            select_node = tree.find(exp.Select)
+            if select_node:
+                select_node.set("expressions", explicit)
 
         return tree.sql(dialect="postgres")
 
@@ -537,14 +554,14 @@ class SQLOptimizerEnvironment(Environment[SQLAction, SQLObservation, SQLState]):
         signals = self._extract_signals(plan)
         legal   = self._compute_legal_actions(self._current_query, plan) if not done else []
 
-        return SQLObservation(
-            current_query=self._current_query,
-            observation_vector=signals,
-            legal_actions=legal,
-            explain_plan=plan,
-            done=done,
-            reward=reward,
-            metadata={
+        return SQLObservation(**{
+            "current_query": self._current_query,
+            "observation_vector": signals,
+            "legal_actions": legal,
+            "explain_plan": plan,
+            "done": done,
+            "reward": reward,
+            "metadata": {
                 "episode_id":       self._episode_id,
                 "step":             self._step_count,
                 "baseline_ms":      self._baseline_time_ms,
@@ -555,9 +572,12 @@ class SQLOptimizerEnvironment(Environment[SQLAction, SQLObservation, SQLState]):
                 ),
                 "rewrites_applied": self._rewrites_applied,
             }
-        )
+        })
 
     def _end_episode(self) -> SQLObservation:
+        if self._db is None:
+            raise RuntimeError("Database connection lost.")
+
         plan       = self._db.get_explain_plan(self._current_query)
         final_time = plan.get("Execution Time", self._current_time_ms)
         reward     = (self._baseline_time_ms - final_time) / max(self._baseline_time_ms, 1)
@@ -565,14 +585,14 @@ class SQLOptimizerEnvironment(Environment[SQLAction, SQLObservation, SQLState]):
         self._current_time_ms = final_time
         self.close()
 
-        return SQLObservation(
-            current_query=self._current_query,
-            observation_vector=self._extract_signals(plan),
-            legal_actions=[],
-            explain_plan=plan,
-            done=True,
-            reward=reward,
-            metadata={
+        return SQLObservation(**{
+            "current_query": self._current_query,
+            "observation_vector": self._extract_signals(plan),
+            "legal_actions": [],
+            "explain_plan": plan,
+            "done": True,
+            "reward": reward,
+            "metadata": {
                 "episode_id":       self._episode_id,
                 "step":             self._step_count,
                 "baseline_ms":      self._baseline_time_ms,
@@ -580,4 +600,4 @@ class SQLOptimizerEnvironment(Environment[SQLAction, SQLObservation, SQLState]):
                 "improvement_pct":  round(reward * 100, 2),
                 "rewrites_applied": self._rewrites_applied,
             }
-        )
+        })

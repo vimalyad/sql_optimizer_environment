@@ -6,6 +6,7 @@
 
 from .client import SQLOptimizerEnv
 from .models import SQLAction, SQLObservation, SQLState
+from .db import PostgreSQLExecutor
 
 __all__ = [
     "SQLOptimizerEnv",
