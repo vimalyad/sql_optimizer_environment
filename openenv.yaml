@@ -5,3 +5,85 @@ runtime: fastapi
 app: server.app:app
 port: 8000
 
+description: >
+  RL environment for learning to rewrite slow SQL queries.
+  Connects to any user-provided Postgres database at episode reset time.
+  No schema knowledge required upfront — discovers tables, indexes,
+  and statistics automatically from pg_catalog and information_schema.
+  Structural rewrites always work; hint-based rewrites activate
+  automatically when pg_hint_plan is detected.
+
+actions:
+  description: >
+    Actions are filtered at runtime based on available Postgres extensions
+    and query-level applicability. See ACTION_REGISTRY in models.py.
+  available:
+    - id: 1
+      name: add_index_hint
+      requires: pg_hint_plan
+      description: "Add /*+ IndexScan(table index) */ to force index usage"
+    - id: 2
+      name: add_join_order_hint
+      requires: pg_hint_plan
+      description: "Add /*+ Leading(...) */ to force join order"
+    - id: 3
+      name: add_join_method_hint
+      requires: pg_hint_plan
+      description: "Add /*+ HashJoin/NestLoop/MergeJoin(...) */ to force join method"
+    - id: 4
+      name: push_predicate
+      requires: ~
+      description: "Move WHERE filter into JOIN ON clause for early filtering"
+    - id: 5
+      name: replace_subquery_with_join
+      requires: ~
+      description: "Rewrite IN (SELECT ...) subquery as an equivalent JOIN"
+    - id: 6
+      name: remove_redundant_join
+      requires: ~
+      description: "Drop a JOIN whose columns are never referenced"
+    - id: 7
+      name: replace_select_star
+      requires: ~
+      description: "Expand SELECT * to explicit column list"
+    - id: 8
+      name: materialize_cte
+      requires: ~
+      description: "Add MATERIALIZED to WITH clause to force one-time execution"
+    - id: 9
+      name: submit
+      requires: ~
+      description: "End episode and return current query as final answer"
+
+env:
+  WORKERS:
+    default: "4"
+    description: "Number of uvicorn worker processes"
+  MAX_CONCURRENT_ENVS:
+    default: "100"
+    description: "Max concurrent sessions per worker"
+  QUERY_TIMEOUT_MS:
+    default: "30000"
+    description: "Max time in ms a single query is allowed to run"
+  MAX_STEPS:
+    default: "10"
+    description: "Max rewrite steps per optimization episode"
+  DATABASE_URL:
+    default: ""
+    description: "Postgres connection string (can also be passed at reset time)"
+
+hardware:
+  recommended: "cpu-upgrade"
+  reason: >
+    Each step runs EXPLAIN ANALYZE against the user's database.
+    cpu-upgrade (8 vCPU) supports ~512 concurrent sessions.
+
+requirements:
+  database:
+    engine: "PostgreSQL >= 13"
+    extension_optional:
+      name: "pg_hint_plan"
+      effect: >
+        Without pg_hint_plan: only structural rewrites available (actions 4-9).
+        Hint actions (1-3) are automatically hidden from legal_actions.
+      install: "https://github.com/ossc-db/pg_hint_plan"
