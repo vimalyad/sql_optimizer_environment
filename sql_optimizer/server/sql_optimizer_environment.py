@@ -2,18 +2,6 @@
 # server/sql_optimizer_environment.py
 #
 # Core RL environment.
-#
-# Episode flow:
-#   1. User calls reset(query, db_url)
-#   2. Environment connects to user's database
-#   3. Environment probes for pg_hint_plan → sets hints_enabled flag
-#   4. Environment measures baseline execution time via EXPLAIN ANALYZE
-#   5. Environment discovers indexes and schema from pg_catalog
-#   6. Agent receives first observation with legal_actions
-#   7. Agent calls step(action) repeatedly
-#   8. Each step rewrites the SQL, measures new time, returns reward
-#   9. Episode ends when agent submits or max steps reached
-#
 # ─────────────────────────────────────────────────────────────────────────────
 
 import os
@@ -24,17 +12,20 @@ import sqlglot
 import sqlglot.expressions as exp
 
 from openenv.core.env_server import Environment
-from sql_optimizer_env.models import (
+
+from sql_optimizer.models import (
     ACTION_REGISTRY,
     SQLAction,
     SQLObservation,
     SQLState,
     get_action_name,
 )
-from sql_optimizer_env.server.db import PostgreSQLExecutor
+
+from sql_optimizer.db import PostgreSQLExecutor
 
 
-class SQLOptimizerEnvironment(Environment):
+# Inherit with full generics to bind Pydantic parsing automatically
+class SQLOptimizerEnvironment(Environment[SQLAction, SQLObservation, SQLState]):
     """
     RL environment that teaches an agent to rewrite slow SQL queries.
 
@@ -75,22 +66,6 @@ class SQLOptimizerEnvironment(Environment):
     def reset(self, query: str, db_url: str) -> SQLObservation:
         """
         Start a new optimization episode.
-
-        Args:
-            query:  The slow SQL query to optimize.
-                    Any valid SELECT statement against the user's database.
-            db_url: Postgres connection string.
-                    e.g. "postgresql://user:pass@host:5432/dbname"
-
-        The environment will:
-          1. Connect to the database and probe for available extensions
-          2. Discover available indexes automatically from pg_catalog
-          3. Run EXPLAIN ANALYZE to measure the baseline execution time
-          4. Return the first observation with legal_actions populated
-
-        Raises:
-            ConnectionError: if the database cannot be reached
-            ValueError: if the query is empty or not a SELECT
         """
         query = query.strip()
         if not query:
@@ -109,9 +84,6 @@ class SQLOptimizerEnvironment(Environment):
         self._db = PostgreSQLExecutor(db_url)
         self._db.connect()
 
-        # Build the extensions list from what the DB reported
-        # PostgreSQLExecutor.available_extensions is a List[str] of
-        # extension names e.g. ["pg_hint_plan", "pg_stat_statements"]
         self._available_extensions = self._db.available_extensions
 
         # Reset episode state
@@ -135,29 +107,14 @@ class SQLOptimizerEnvironment(Environment):
     def step(self, action: SQLAction) -> SQLObservation:
         """
         Apply one rewrite action to the current query.
-
-        The action must be chosen from the legal_actions list in the
-        last observation. Choosing an action not in legal_actions is
-        allowed but will return reward=-0.05 and no change.
-
-        Returns the new observation including:
-          - the rewritten SQL
-          - the new observation_vector
-          - updated legal_actions for the next step
-          - the reward for this step
         """
         if self._db is None:
             raise RuntimeError("Call reset() before step()")
 
         self._step_count += 1
 
-        # Validate action against registry
-        try:
-            action.validate()
-        except ValueError as e:
-            print(f"[env] Invalid action: {e}")
-            plan = self._db.get_explain_plan(self._current_query)
-            return self._build_observation(plan=plan, reward=-0.05, done=False)
+        # NOTE: Manual validation removed. `action` is fully validated by 
+        # Pydantic via the openenv framework before this step executes.
 
         # Terminal action
         if action.action_id == 9:
@@ -182,7 +139,7 @@ class SQLOptimizerEnvironment(Environment):
         new_time = new_plan.get("Execution Time", self._current_time_ms)
 
         # Reward: normalised improvement relative to baseline
-        reward = (self._current_time_ms - new_time) / self._baseline_time_ms
+        reward = (self._current_time_ms - new_time) / max(self._baseline_time_ms, 1)
 
         # Update state
         prev_time = self._current_time_ms
@@ -225,27 +182,22 @@ class SQLOptimizerEnvironment(Environment):
             improvement_pct=round(improvement, 2),
         )
 
+    def close(self):
+        """Cleanup Hook."""
+        if self._db:
+            self._db.close()
+            self._db = None
+
     # ─────────────────────────────────────────────────────────────────────────
     # LEGAL ACTIONS
     # ─────────────────────────────────────────────────────────────────────────
 
     def _compute_legal_actions(
-        self, sql: str, plan: Dict
+        self, sql: str, plan: Dict[str, Any]
     ) -> List[Dict[str, Any]]:
-        """
-        Compute which actions are valid for the current query state.
-
-        Two passes:
-          1. Filter ACTION_REGISTRY by available_extensions → candidate set
-          2. For each candidate, inspect the SQL AST to check applicability
-
-        This replaces the old hardcoded TIER1/TIER2 split.
-        Adding a new action only requires an entry in ACTION_REGISTRY.
-        """
         try:
             tree = sqlglot.parse_one(sql, dialect="postgres")
         except Exception:
-            # Unparseable — only submit is safe
             return [{
                 "action_id": 9,
                 "name": "submit",
@@ -266,14 +218,11 @@ class SQLOptimizerEnvironment(Environment):
         where        = tree.find(exp.Where)
         used_tables  = {c.table for c in tree.find_all(exp.Column) if c.table}
 
-        # Applicability checks — keyed by action_id
-        # Returns a list of (params, description) pairs.
-        # Empty list means action is not applicable to the current query.
         def applicable(action_id: int) -> List[Dict[str, Any]]:
             has_seq_scan = signals[2] == 1.0
             rows_removed = signals[4]
 
-            if action_id == 1:  # add_index_hint
+            if action_id == 1:
                 if not (has_seq_scan and rows_removed > 1000):
                     return []
                 return [
@@ -285,7 +234,7 @@ class SQLOptimizerEnvironment(Environment):
                     for index in self._available_indexes.get(table, [])
                 ]
 
-            if action_id == 2:  # add_join_order_hint
+            if action_id == 2:
                 if len(inner_joins) < 2:
                     return []
                 return [{
@@ -293,7 +242,7 @@ class SQLOptimizerEnvironment(Environment):
                     "description": f"hint: join order {' → '.join(tables)}",
                 }]
 
-            if action_id == 3:  # add_join_method_hint
+            if action_id == 3:
                 if len(inner_joins) < 1 or len(tables) < 2:
                     return []
                 return [
@@ -308,7 +257,7 @@ class SQLOptimizerEnvironment(Environment):
                     for method in ["HashJoin", "NestLoop", "MergeJoin"]
                 ]
 
-            if action_id == 4:  # push_predicate
+            if action_id == 4:
                 if not (where and joins):
                     return []
                 for condition in where.find_all(exp.EQ):
@@ -320,12 +269,12 @@ class SQLOptimizerEnvironment(Environment):
                         }]
                 return []
 
-            if action_id == 5:  # replace_subquery_with_join
+            if action_id == 5:
                 if not has_subquery:
                     return []
                 return [{"params": {}, "description": "replace IN (SELECT...) subquery with JOIN"}]
 
-            if action_id == 6:  # remove_redundant_join
+            if action_id == 6:
                 candidates = []
                 for join in joins:
                     t = join.find(exp.Table)
@@ -338,28 +287,25 @@ class SQLOptimizerEnvironment(Environment):
                         })
                 return candidates
 
-            if action_id == 7:  # replace_select_star
+            if action_id == 7:
                 if not has_star:
                     return []
                 return [{"params": {}, "description": "expand SELECT * to explicit column list"}]
 
-            if action_id == 8:  # materialize_cte
+            if action_id == 8:
                 if not has_cte:
                     return []
                 return [{"params": {}, "description": "add MATERIALIZED to CTE"}]
 
-            if action_id == 9:  # submit — always available
+            if action_id == 9:
                 return [{"params": {}, "description": "submit current query as final answer"}]
 
             return []
 
-        # Build legal_actions: extension filter first, then applicability
         legal = []
         for action_id, meta in ACTION_REGISTRY.items():
-            # Skip if a required extension is not available
             if not all(ext in self._available_extensions for ext in meta["requires"]):
                 continue
-            # Check query-level applicability
             for match in applicable(action_id):
                 legal.append({
                     "action_id": action_id,
@@ -371,7 +317,7 @@ class SQLOptimizerEnvironment(Environment):
         return legal
 
     # ─────────────────────────────────────────────────────────────────────────
-    # ACTION FUNCTIONS — one per action_id
+    # ACTION FUNCTIONS
     # ─────────────────────────────────────────────────────────────────────────
 
     def _apply_action(self, sql: str, action: SQLAction) -> str:
@@ -391,7 +337,6 @@ class SQLOptimizerEnvironment(Environment):
         return fn(sql, **action.params)
 
     def _add_hint_comment(self, sql: str, new_hint: str) -> str:
-        """Append to existing /*+ ... */ block or create a new one."""
         stripped = sql.strip()
         if stripped.startswith("/*+"):
             closing = stripped.index("*/")
@@ -538,14 +483,10 @@ class SQLOptimizerEnvironment(Environment):
         return tree.sql(dialect="postgres")
 
     # ─────────────────────────────────────────────────────────────────────────
-    # SIGNAL EXTRACTION — EXPLAIN JSON → flat feature vector
+    # SIGNAL EXTRACTION
     # ─────────────────────────────────────────────────────────────────────────
 
-    def _extract_signals(self, plan: Dict) -> List[float]:
-        """
-        Walk the EXPLAIN ANALYZE JSON tree and extract a flat feature vector.
-        Position is fixed — agent sees only numbers, not names.
-        """
+    def _extract_signals(self, plan: Dict[str, Any]) -> List[float]:
         signals = {
             "execution_time_ms":       plan.get("Execution Time", 0.0),
             "total_plan_cost":         0.0,
@@ -559,7 +500,7 @@ class SQLOptimizerEnvironment(Environment):
             "estimated_vs_actual_gap": 0.0,
         }
 
-        def walk(node: Dict) -> None:
+        def walk(node: Dict[str, Any]) -> None:
             node_type = node.get("Node Type", "")
             signals["total_plan_cost"] = max(
                 signals["total_plan_cost"], node.get("Total Cost", 0.0)
@@ -591,7 +532,7 @@ class SQLOptimizerEnvironment(Environment):
     # ─────────────────────────────────────────────────────────────────────────
 
     def _build_observation(
-        self, plan: Dict, reward: float, done: bool
+        self, plan: Dict[str, Any], reward: float, done: bool
     ) -> SQLObservation:
         signals = self._extract_signals(plan)
         legal   = self._compute_legal_actions(self._current_query, plan) if not done else []
@@ -622,7 +563,7 @@ class SQLOptimizerEnvironment(Environment):
         reward     = (self._baseline_time_ms - final_time) / max(self._baseline_time_ms, 1)
 
         self._current_time_ms = final_time
-        self._db.close()
+        self.close()
 
         return SQLObservation(
             current_query=self._current_query,

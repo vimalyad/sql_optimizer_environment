@@ -1,21 +1,23 @@
-# sql_optimizer_env/client.py
-
 from typing import Any, Dict
-from openenv.core.http_env_client import HTTPEnvClient
-from openenv.core.types import StepResult
-from sql_optimizer_env.models import SQLAction, SQLObservation, SQLState
+from openenv.core.env_client import EnvClient
+from openenv.core.client_types import StepResult
+
+from sql_optimizer.models import SQLAction, SQLObservation, SQLState
 
 
-class SQLOptimizerEnv(HTTPEnvClient[SQLAction, SQLObservation]):
+class SQLOptimizerEnv(EnvClient[SQLAction, SQLObservation, SQLState]):
+    """Client for the SQL Optimizer Environment."""
 
     def _step_payload(self, action: SQLAction) -> Dict[str, Any]:
+        """Convert the typed Action into a raw payload for the server."""
         return {
             "action_id": action.action_id,
             "params":    action.params,
             "metadata":  action.metadata,
         }
 
-    def _parse_result(self, payload: Dict) -> StepResult:
+    def _parse_result(self, payload: Dict[str, Any]) -> StepResult[SQLObservation]:
+        """Parse the server's raw step response into a StepResult."""
         obs = payload.get("observation", {})
         return StepResult(
             observation=SQLObservation(
@@ -23,7 +25,7 @@ class SQLOptimizerEnv(HTTPEnvClient[SQLAction, SQLObservation]):
                 observation_vector=obs.get("observation_vector", []),
                 legal_actions=obs.get("legal_actions", []),
                 explain_plan=obs.get("explain_plan", {}),
-                #hints_available=obs.get("hint", False)
+                # hints_available=obs.get("hint", False)
                 done=obs.get("done", False),
                 reward=obs.get("reward", 0.0),
                 metadata=obs.get("metadata", {}),
@@ -31,9 +33,9 @@ class SQLOptimizerEnv(HTTPEnvClient[SQLAction, SQLObservation]):
             reward=payload.get("reward", 0.0),
             done=payload.get("done", False),
         )
-    
 
-    def _parse_state(self, payload: Dict) -> SQLState:
+    def _parse_state(self, payload: Dict[str, Any]) -> SQLState:
+        """Parse the server's state response into a State object."""
         return SQLState(
             episode_id=payload.get("episode_id"),
             original_query=payload.get("original_query", ""),

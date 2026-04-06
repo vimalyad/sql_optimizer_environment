@@ -6,6 +6,6 @@
 
 """Sql Optimizer environment server components."""
 
-from .sql_optimizer_environment import SqlOptimizerEnvironment
+from sql_optimizer.server.sql_optimizer_environment import SQLOptimizerEnvironment
 
 __all__ = ["SqlOptimizerEnvironment"]

@@ -9,7 +9,7 @@ requires = ["setuptools>=45", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "openenv-sql_optimizer"
+name = "sql_optimizer"
 version = "0.1.0"
 description = "Sql Optimizer environment for OpenEnv"
 requires-python = ">=3.10"
@@ -26,6 +26,7 @@ dependencies = [
     # "gymnasium>=0.29.0",
     # "openspiel>=1.0.0",
     # "smolagents>=1.22.0,<2",
+    "psycopg2>=2.9.11",
     "sqlglot>=30.2.1",
 ]
 
@@ -43,4 +44,3 @@ server = "sql_optimizer.server.app:main"
 [tool.setuptools]
 include-package-data = true
 packages = ["sql_optimizer", "sql_optimizer.server"]
-package-dir = { "sql_optimizer" = ".", "sql_optimizer.server" = "server" }
