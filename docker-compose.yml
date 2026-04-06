@@ -37,8 +37,8 @@ services:
 
   env:
     build:
-      context: .        # sql_optimizer/ folder is the build context
-      dockerfile: server/Dockerfile
+      context: .
+      dockerfile: sql_optimizer/server/Dockerfile    # ← fixed path
     container_name: sql_optimizer_env
     ports:
       - "8000:8000"

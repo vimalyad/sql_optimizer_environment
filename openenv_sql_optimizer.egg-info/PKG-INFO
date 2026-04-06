@@ -1,11 +1,25 @@
 Metadata-Version: 2.4
-Name: openenv-sql_optimizer
+Name: openenv-sql-optimizer
 Version: 0.1.0
-Summary: Sql Optimizer environment for OpenEnv
+Summary: RL environment that teaches an agent to rewrite slow SQL queries. Connects to any Postgres database at runtime — no schema knowledge required upfront.
 Requires-Python: >=3.10
+Description-Content-Type: text/markdown
 Requires-Dist: openenv-core[core]>=0.2.2
-Requires-Dist: psycopg2>=2.9.11
-Requires-Dist: sqlglot>=30.2.1
+Requires-Dist: psycopg2-binary>=2.9.0
+Requires-Dist: sqlglot>=23.0.0
+Requires-Dist: fastapi>=0.100.0
+Requires-Dist: uvicorn[standard]>=0.20.0
+Requires-Dist: pydantic>=2.0.0
 Provides-Extra: dev
 Requires-Dist: pytest>=8.0.0; extra == "dev"
 Requires-Dist: pytest-cov>=4.0.0; extra == "dev"
+Requires-Dist: pytest-asyncio>=0.21.0; extra == "dev"
+Requires-Dist: httpx>=0.24.0; extra == "dev"
+Requires-Dist: black>=23.0.0; extra == "dev"
+Requires-Dist: ruff>=0.1.0; extra == "dev"
+Provides-Extra: train
+Requires-Dist: torch>=2.0.0; extra == "train"
+Requires-Dist: transformers>=4.40.0; extra == "train"
+Requires-Dist: trl>=0.8.0; extra == "train"
+Requires-Dist: datasets>=2.0.0; extra == "train"
+Requires-Dist: accelerate>=0.20.0; extra == "train"

@@ -1,46 +1,87 @@
-# Copyright (c) Meta Platforms, Inc. and affiliates.
-# All rights reserved.
-#
-# This source code is licensed under the BSD-style license found in the
-# LICENSE file in the root directory of this source tree.
+# ─────────────────────────────────────────────────────────────────────────────
+# SQL Query Optimizer Environment
+# Meta OpenEnv Hackathon
+# ─────────────────────────────────────────────────────────────────────────────
 
 [build-system]
 requires = ["setuptools>=45", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "sql_optimizer"
+name = "openenv-sql-optimizer"
 version = "0.1.0"
-description = "Sql Optimizer environment for OpenEnv"
+description = "RL environment that teaches an agent to rewrite slow SQL queries. Connects to any Postgres database at runtime — no schema knowledge required upfront."
+readme = "README.md"
 requires-python = ">=3.10"
+
 dependencies = [
-    # Core OpenEnv runtime (provides FastAPI server + HTTP client types)
-    # install from github
-    # "openenv-core[core] @ git+https://github.com/meta-pytorch/OpenEnv.git",
+    # ── OpenEnv core ──────────────────────────────────────────────────────────
+    # Provides: Environment base class, EnvClient, FastAPI server factory
     "openenv-core[core]>=0.2.2",
-    # Environment-specific dependencies
-    # Add all dependencies needed for your environment here
-    # Examples:
-    # "numpy>=1.19.0",
-    # "torch>=2.0.0",
-    # "gymnasium>=0.29.0",
-    # "openspiel>=1.0.0",
-    # "smolagents>=1.22.0,<2",
-    "psycopg2>=2.9.11",
-    "sqlglot>=30.2.1",
+
+    # ── Postgres driver ───────────────────────────────────────────────────────
+    # psycopg2-binary includes the C library statically linked.
+    # No system libpq needed — works inside the Docker container out of the box.
+    "psycopg2-binary>=2.9.0",
+
+    # ── SQL parser and rewriter ───────────────────────────────────────────────
+    # Parses SQL into an AST, applies structural rewrites, serializes back.
+    # Supports postgres dialect, handles hints, CTEs, subqueries, joins.
+    "sqlglot>=23.0.0",
+
+    # ── Web server ────────────────────────────────────────────────────────────
+    "fastapi>=0.100.0",
+    "uvicorn[standard]>=0.20.0",
+
+    # ── Validation ────────────────────────────────────────────────────────────
+    "pydantic>=2.0.0",
 ]
 
 [project.optional-dependencies]
+
+# Install with: uv pip install -e ".[dev]"
 dev = [
     "pytest>=8.0.0",
     "pytest-cov>=4.0.0",
+    "pytest-asyncio>=0.21.0",
+    "httpx>=0.24.0",        # for testing FastAPI endpoints
+    "black>=23.0.0",        # formatter
+    "ruff>=0.1.0",          # linter
+]
+
+# Install with: uv pip install -e ".[train]"
+# Everything needed to run a GRPO training loop against this environment
+train = [
+    "torch>=2.0.0",
+    "transformers>=4.40.0",
+    "trl>=0.8.0",
+    "datasets>=2.0.0",
+    "accelerate>=0.20.0",
 ]
 
 [project.scripts]
-# Server entry point - enables running via: uv run --project . server
-# or: python -m sql_optimizer.server.app
+# Start the environment server:
+#   uv run server
 server = "sql_optimizer.server.app:main"
 
 [tool.setuptools]
 include-package-data = true
-packages = ["sql_optimizer", "sql_optimizer.server"]
+packages = [
+    "sql_optimizer",
+    "sql_optimizer.server",
+]
+[tool.setuptools.package-dir]
+"sql_optimizer"        = "sql_optimizer"
+"sql_optimizer.server" = "sql_optimizer/server"
+
+# ── Linting ───────────────────────────────────────────────────────────────────
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+select = ["E", "F", "W", "I"]
+ignore = ["E501"]
+
+# ── Testing ───────────────────────────────────────────────────────────────────
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"

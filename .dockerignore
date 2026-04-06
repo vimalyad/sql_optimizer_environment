@@ -1,15 +1,43 @@
-.venv
-.git
-.gitignore
-.env
+# Python
 __pycache__/
-*.pyc
+*.py[cod]
 *.pyo
-*.pyd
-*.pyw
-*.pyz
-*.pywz
-*.pyzw
-*.pyzwz
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+dist/
+build/
+.eggs/
 
+# Virtual environments
+.venv/
+venv/
+env/
 
+# Development files
+.env
+.env.*
+!.env.example
+dev/
+tests/
+
+# Version control
+.git/
+.gitignore
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docs
+*.md
+docs/
+
+# Logs
+*.log
